@@ -9,9 +9,7 @@ from functools import wraps
 admin_bp = Blueprint('admin', __name__)
 
 
-# ------------------------
-# Decorator for Login Required
-# ------------------------
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -20,10 +18,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-
-# ------------------------
-# Routes
-# ------------------------
 
 @admin_bp.route("/Admin")
 @login_required
