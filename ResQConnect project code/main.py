@@ -9,49 +9,124 @@ from extension import mongo  # ✅ New import
 from admin_routes import admin_bp  # ✅ Now this won't cause circular import
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+from twilio.rest import Client
+
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
 
+# ✅ Load configuration from config.json
 with open('config.json', 'r') as c:
-    params = json.load(c)["params"]
+    config = json.load(c)
 
+params = config["params"]
+twilio_config = config["twilio"]
+
+# ✅ MongoDB setup
 app.config["MONGO_URI"] = params["mongo_uri"]
-mongo.init_app(app)  # ✅ Initialize mongo here
+mongo.init_app(app)
 
+# ✅ Register Blueprints
 app.register_blueprint(admin_bp)
 
+# ✅ Twilio setup
+account_sid = twilio_config["account_sid"]
+auth_token = twilio_config["auth_token"]
+twilio_number = twilio_config["from_number"]
+resq_team_number = twilio_config["resq_team_number"]
 
-# ------------------- ROUTES -------------------
+client = Client(account_sid, auth_token)
 
+# ✅ Route for complaint submission
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
+        name = request.form['name']
+        contact = request.form['contact']
+        emergency_type = request.form['emergency']
+        location = request.form['location']
+        description = request.form['description']
+
         complaint = {
-            "name": request.form['name'],
-            "contact": request.form['contact'],
-            "emergency_type": request.form['emergency'],
-            "location": request.form['location'],
-            "description": request.form['description'],
+            "name": name,
+            "contact": contact,
+            "emergency_type": emergency_type,
+            "location": location,
+            "description": description,
             "timestamp": datetime.utcnow()
         }
+
+        # Save complaint to MongoDB
         mongo.db.complaints.insert_one(complaint)
+
+        try:
+            # ✅ Alert SMS to ResQ team
+            team_sms = (
+                f"🚨 Emergency Alert 🚨\n"
+                f"Type: {emergency_type}\n"
+                f"Name: {name}\n"
+                f"Contact: {contact}\n"
+                f"Location: {location}\n"
+                f"Details: {description}\n"
+                f"⚠️ Please respond immediately!"
+            )
+            client.messages.create(
+                body=team_sms,
+                from_=twilio_number,
+                to=resq_team_number
+            )
+
+            # ✅ Confirmation SMS to user
+            user_contact = contact if contact.startswith('+') else '+91' + contact
+            user_sms = "✅ Your complaint has been registered. Help is on the way."
+            client.messages.create(
+                body=user_sms,
+                from_=twilio_number,
+                to=user_contact
+            )
+
+        except Exception as e:
+            print("❌ Failed to send SMS:", e)
+
         return redirect('/register')
+
     return render_template('Home.html')
+
 
 @app.route('/c', methods=['GET', 'POST'])
 def contact():
     if request.method == 'POST':
+        name = request.form['name']
+        contact_number = request.form['contact']
+        location = request.form['location']
+        description = request.form['description']
+
         contact_data = {
-            "name": request.form['name'],
-            "contact": request.form['contact'],
-            "location": request.form['location'],
-            "description": request.form['description'],
+            "name": name,
+            "contact": contact_number,
+            "location": location,
+            "description": description,
             "timestamp": datetime.utcnow()
         }
+
+        # Prepare SMS
+        user_contact = contact_number if contact_number.startswith('+') else '+91' + contact_number
+        user_sms = "✅ Your contact request has been registered. We will contact you as early as possible."
+
+        try:
+            client.messages.create(
+                body=user_sms,
+                from_=twilio_number,
+                to=user_contact
+            )
+        except Exception as e:
+            print("❌ Failed to send SMS:", e)
+
         mongo.db.contacts.insert_one(contact_data)
         return redirect('/contactus')
+
     return render_template('Home.html')
+
 
 @app.route("/tagline/<string:Emergency_id>")
 def tagline(Emergency_id):
@@ -132,9 +207,9 @@ def page_not_found(e):
 # 🕒 Schedule your jobs here
 scheduler = BackgroundScheduler()
 
-scheduler.add_job(alert_store, 'interval', minutes=10)
+scheduler.add_job(alert_store, 'interval', minutes=1)
 
-scheduler.add_job(wether_store, 'interval', minutes=10)
+scheduler.add_job(wether_store, 'interval', minutes=1)
 
 scheduler.add_job(lambda: cleanup_old_alerts(7), 'cron', hour=0, minute=0)
 

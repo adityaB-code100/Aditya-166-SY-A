@@ -96,4 +96,11 @@
     <a href="/home" class="link-button">Go to Website</a>
   </div>
 </body>
+<script>
+window.history.pushState(null, null, location.href);
+window.onpopstate = function () {
+    window.history.pushState(null, null, location.href);
+};
+</script>
+
 </html>
